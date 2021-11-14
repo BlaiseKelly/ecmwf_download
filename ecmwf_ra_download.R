@@ -4,18 +4,26 @@ library(dplyr)
 library(sf)
 library(ncdf4)
 library(ecmwfr)
-
-##define select function
-select <- dplyr::select
+library(rnaturalearth)
+library(rnaturalearthdata)
 
 ##define coordinate systems
 latlong = "+init=epsg:4326"
 rdnew = "+init=epsg:28992"
-##define the minimum and maximum latitude and longitude
-lon_min <- -5.2
-lon_max <- -5.6
-lat_min <- 50.1
-lat_max <- 50.8
+
+## import country shapefile to define max min coordinates
+ctry <- c("united kingdom")
+  
+  c_shp <- st_as_sf(ne_countries(country = ct))
+  c_sf <- c_shp %>%
+    st_transform(rdnew) %>% 
+    st_buffer(200000) %>% 
+    st_transform(latlong)
+  
+  min_lon <- floor(min(st_coordinates(c_sf)[,1]))
+  max_lon <- ceiling(max(st_coordinates(c_sf)[,1]))
+  min_lat <- floor(min(st_coordinates(c_sf)[,2]))
+  max_lat <- ceiling(max(st_coordinates(c_sf)[,2]))
 
 ## convert to ecmwf friendly numbers
   min_lon <- floor(lon_min)

@@ -25,12 +25,19 @@ ctry <- c("united kingdom")
   min_lat <- floor(min(st_coordinates(c_sf)[,2]))
   max_lat <- ceiling(max(st_coordinates(c_sf)[,2]))
 
-## convert to ecmwf friendly numbers
-  min_lon <- floor(lon_min)
-  max_lon <- ceiling(lon_max)
-  
-  min_lat <- floor(lat_min)
-  max_lat <- ceiling(lat_max)
+
+##define the minimum and maximum latitude and longitude, or define manually
+# lon_min <- -5.2
+# lon_max <- -5.6
+# lat_min <- 50.1
+# lat_max <- 50.8
+# 
+# ## convert to ecmwf friendly numbers
+#   min_lon <- floor(lon_min)
+#   max_lon <- ceiling(lon_max)
+#   
+#   min_lat <- floor(lat_min)
+#   max_lat <- ceiling(lat_max)
 
  ##define the max and min domain for the ecmwf request
   ecmwf_land_area <- paste0(min_lat, "/", min_lon, "/", max_lat, "/", max_lon)

@@ -7,18 +7,15 @@ library(ecmwfr)
 library(rnaturalearth)
 library(rnaturalearthdata)
 
-##define coordinate systems
-latlong = "+init=epsg:4326"
-rdnew = "+init=epsg:28992"
-
 ## import country shapefile to define max min coordinates
 ctry <- c("united kingdom")
   
-  c_shp <- st_as_sf(ne_countries(country = ct))
+  c_shp <- st_as_sf(ne_countries(country = ctry))
   c_sf <- c_shp %>%
-    st_transform(rdnew) %>% 
+    st_union() %>% 
+    st_transform(28992) %>% 
     st_buffer(200000) %>% 
-    st_transform(latlong)
+    st_transform(4326)
   
   min_lon <- floor(min(st_coordinates(c_sf)[,1]))
   max_lon <- ceiling(max(st_coordinates(c_sf)[,1]))
@@ -43,13 +40,13 @@ ctry <- c("united kingdom")
   ecmwf_land_area <- paste0(min_lat, "/", min_lon, "/", max_lat, "/", max_lon)
   
   ##output path, don't put a / at the end or will return an error
-  path_out <- "C:/Users/xxxx/Downloads"
+  path_out <- "Z:/02_storage/ECMWF/single_level/"
   
   ##input ecmwf user id
-  user = "xxx@xxxx.nl" ## ecmwf username
+  user = "" ## ecmwf username
   
-  wf_set_key(user = "5 digits", ## user id
-             key = "36 character key", ## key
+  wf_set_key(user = "", ## user id
+             key = "", ## key
              service = "cds") ##service (cds = 'climate data store')
   
   ##define variables to download. list is available here: https://confluence.ecmwf.int/display/CKB/ERA5-Land%3A+data+documentation#ERA5Land:datadocumentation-parameterlistingParameterlistings
@@ -72,6 +69,7 @@ ctry <- c("united kingdom")
         
         for (m in monthz){
         
+          m_nam <- sprintf("%02d", m)
       
       request_BLD <- list(dataset_short_name = "reanalysis-era5-land",
                           product_type   = "reanalysis",
@@ -82,7 +80,7 @@ ctry <- c("united kingdom")
                           time = c("00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"),
                           area           = ecmwf_land_area,
                           format         = "netcdf",
-                          target         = paste0(v, "_", y,m, ".nc"))
+                          target         = paste0(v, "_", y,m_nam, ".nc"))
       
       
       nc_BLD <- wf_request(user = "59954",
@@ -111,6 +109,9 @@ ctry <- c("united kingdom")
     for (y in yrz){
       
       for (m in monthz){
+        
+        ## convert month name to 2 digit for file name
+        m_nam <- sprintf("%02d", m)
     
     request_BLD <- list(dataset_short_name = "reanalysis-era5-single-levels",
                         product_type   = "reanalysis",
@@ -121,7 +122,7 @@ ctry <- c("united kingdom")
                         time = c("00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"),
                         area           = ecmwf_main_area,
                         format         = "netcdf",
-                        target         = paste0(v, "_", y,m, ".nc"))
+                        target         = paste0(v, "_", y,m_nam, ".nc"))
     
     
     nc_BLD <- wf_request(user = "59954",

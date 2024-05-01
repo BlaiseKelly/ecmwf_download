@@ -4,23 +4,16 @@ library(dplyr)
 library(sf)
 library(ncdf4)
 library(ecmwfr)
-library(rnaturalearth)
-library(rnaturalearthdata)
+library(osmdata)
 
-## import country shapefile to define max min coordinates
-ctry <- c("united kingdom")
-  
-  c_shp <- st_as_sf(ne_countries(country = ctry))
-  c_sf <- c_shp %>%
-    st_union() %>% 
-    st_transform(28992) %>% 
-    st_buffer(200000) %>% 
-    st_transform(4326)
-  
-  min_lon <- floor(min(st_coordinates(c_sf)[,1]))
-  max_lon <- ceiling(max(st_coordinates(c_sf)[,1]))
-  min_lat <- floor(min(st_coordinates(c_sf)[,2]))
-  max_lat <- ceiling(max(st_coordinates(c_sf)[,2]))
+## import some coordinates
+place <- osmdata::getbb("Bristol")
+
+## find extent
+min_lon <- place[1]
+max_lon <- place[3]
+min_lat <- place[2]
+max_lat <- place[4]
 
 
 ##define the minimum and maximum latitude and longitude, or define manually
@@ -40,7 +33,7 @@ ctry <- c("united kingdom")
   ecmwf_land_area <- paste0(min_lat, "/", min_lon, "/", max_lat, "/", max_lon)
   
   ##output path, don't put a / at the end or will return an error
-  path_out <- "Z:/02_storage/ECMWF/single_level/"
+  path_out <- "./"
   
   ##input ecmwf user id
   user = "" ## ecmwf username

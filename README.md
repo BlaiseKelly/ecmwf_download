@@ -20,3 +20,5 @@ and copy the 6 digit UID to the 'user' and the API key to 'key'.
 ```
 
 To see the status of request made by the script go to https://cds.climate.copernicus.eu/cdsapp#!/yourrequests
+
+The reanalysis-era5-land is a higher resolution dataset only available over land. Not as many parameters are available as the reanalysis-era5-single-levels, so examples of both are given.

@@ -7,14 +7,15 @@ library(ecmwfr)
 library(osmdata)
 
 ## import some coordinates
-place <- osmdata::getbb("Bristol")
+place <- osmdata::getbb("Bristol") 
+
+buff <- 0.1
 
 ## find extent
-min_lon <- place[1]
-max_lon <- place[3]
-min_lat <- place[2]
-max_lat <- place[4]
-
+min_lon <- place[1]-buff
+max_lon <- place[3]+buff
+min_lat <- place[2]-buff
+max_lat <- place[4]+buff
 
 ##define the minimum and maximum latitude and longitude, or define manually
 # lon_min <- -5.2
@@ -33,7 +34,9 @@ max_lat <- place[4]
   ecmwf_land_area <- paste0(min_lat, "/", min_lon, "/", max_lat, "/", max_lon)
   
   ##output path, don't put a / at the end or will return an error
-  path_out <- "./"
+  path_out <- "downloads"
+  ## make sure it is there
+  dir.create(path_out, recursive = TRUE)
   
   ##input ecmwf user id
   user = "" ## ecmwf username
@@ -43,11 +46,10 @@ max_lat <- place[4]
              service = "cds") ##service (cds = 'climate data store')
   
   ##define variables to download. list is available here: https://confluence.ecmwf.int/display/CKB/ERA5-Land%3A+data+documentation#ERA5Land:datadocumentation-parameterlistingParameterlistings
-  variables <- c("surface_net_solar_radiation",
-                 "surface_solar_radiation_downwards", "2m_temperature", "10m_u_component_of_wind",
+  variables <- c("surface_solar_radiation_downwards", "2m_temperature", "10m_u_component_of_wind",
                  "10m_v_component_of_wind", "total_precipitation")
 
-  yrz <- c("2018", "2019", "2020", "2021", "2022")
+  yrz <- c("2022")
   
   ## recent update to climate data store means some datasets (e.g. reanalysis land) have a 1000 line limit. To avoid files of different time periods
   ## which can cause headaches down the line, best to split into months
@@ -93,7 +95,7 @@ max_lat <- place[4]
 
   ##for list of variables visit https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-single-levels?tab=form create a query and click
   ## 'show API request' next to the variable with the the variable text to paste into the list of strings below
-  variables_main <- c("total_sky_direct_solar_radiation_at_surface", "surface_solar_radiation_downwards")
+  variables_main <- c("total_sky_direct_solar_radiation_at_surface")
   
   ##ECMWF data
   

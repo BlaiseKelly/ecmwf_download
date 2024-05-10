@@ -1,26 +1,19 @@
-library(raster)
 library(lubridate)
 library(dplyr)
 library(ncdf4)
 library(reshape2)
 library(sf)
 library(openair)
-library(rnaturalearth)
-library(rnaturalearthdata)
 library(tmap)
 library(birk)
-library(magick)
-library(pals)
 library(worldmet)
 
 ##define coordinate systems
 latlong = "+init=epsg:4326"
 rdnew = "+init=epsg:28992" ## metres coordinate system - Dutch
 
-
-
-
-variables <- "2m_temperature"
+variables <- c("surface_solar_radiation_downwards", "2m_temperature", "10m_u_component_of_wind",
+               "10m_v_component_of_wind", "total_precipitation", "total_sky_direct_solar_radiation_at_surface")
 ##output path as previously defined
 path_out <- "downloads"
 
@@ -35,7 +28,7 @@ site_lat <- bristol_airport$latitude
 site_lon <- bristol_airport$longitude
 
 noaa_dat <- importNOAA(bristol_airport$code, year = as.numeric(yrz))
-
+all_varz <- list()
 for (v in variables){
   
   dat_list <- list()
@@ -81,257 +74,82 @@ for (v in variables){
   
   }
   
-  all_var_dat <- do.call(rbind, dat_list)
-  noaa_ecmwf <- left_join(noaa_dat, all_var_dat, by = "date")
+  all_varz[[v]] <- do.call(rbind, dat_list)
+ 
+}
+
+ecmwf_all <- purrr::reduce(all_varz, left_join, by = "date")
+
+## calculate wind direction in degrees from u and v
+windDir <- function(u,v){
+  (270-atan2(u,v)*180/pi)%%360
+}
+
+## convert raw outputs to standard units
+ecmwf_units <- ecmwf_all %>% 
+  transmute(date,
+            ws_ms = sqrt(u10^2+v10^2),
+            wd_deg = windDir(u = u10, v = v10),
+            t_deg = t2m - 273.15,
+            fdir_wm2 = fdir/3600)
+
+## ssrd and precip are cumulative so needs a bit of messing to fix
+library(zoo)
+## ssrd data is cumulative so for the daily total we only need the value at the end of the day 23:00
+ecmwf_cum <- ecmwf_all %>%
+  mutate(colsplit(date, " ", c("day", "hour")),
+         row_d8 = seq(1:NROW(date))) %>% 
+  mutate(ssrd = c(ssrd[-1],0), tp = c(tp[-1],0))
+
+
+d <- unique(ecmwf_cum$day)[2]
+day_vals <- list()
+for (d in unique(ecmwf_cum$day)){
+  
+  cum_df <- ecmwf_cum %>% 
+    filter(day == d) %>% 
+    transmute(date, ssrd = c(ssrd[1], diff(ssrd)), tp = c(tp[1],diff(tp)))
+  
+  day_vals[[d]] <- cum_df
   
 }
+
+ecmwf_out <- do.call(rbind,day_vals)
+
+noaa_ecmwf <- noaa_dat %>% 
+  left_join(ecmwf_units, by = "date") %>% 
+  left_join(ecmwf_out, by = "date")
 
 ## plot observed and modelled temperature
-## reshape the df
-noaa_ecmwf_temp <- noaa_ecmwf %>% 
-  transmute(date, obs = air_temp, mod = t2m-273.15)
+temp_mod_obs <- noaa_ecmwf %>% 
+  transmute(date, obs = air_temp, mod = t_deg)
 
-p1 <- timePlot(noaa_ecmwf_temp, c("obs", "mod"))    
+p1 <- timePlot(temp_mod_obs, c("obs", "mod"))    
 
-noaa_ecmwf_temp_down <- melt( noaa_ecmwf_temp, 'date')
+temp_mod_obs_down <- melt(temp_mod_obs, 'date')
 
-p2 <- timeVariation(noaa_ecmwf_temp, "value", group = "variable")  
-  
-## open the file
-ECMWF <- nc_open(paste0("downloads/", v, "_",y, m, ".nc"))
-##get latitude and longitude range from file
-      lons <- ncvar_get(ECMWF, "longitude")
-      lats <- ncvar_get(ECMWF, "latitude")
-      ## find netcdf extent that matches country shape file
-      lon_min <- which.closest(lons, min_lon)
-      lon_max <- which.closest(lons, max_lon)
-      lat_min <- which.closest(lats, min_lat)
-      lat_max <- which.closest(lats, max_lat)
-      
-      ##determine how many latitude and longitude variables there are
-      lat_n <- NROW(lats)
-      lon_n <- NROW(lons)
-## import all coordinates for country area
-      longitude <- ncvar_get(ECMWF, "longitude", start = c(lon_min), count = c(lon_max-lon_min))
-      latitude <- ncvar_get(ECMWF, "latitude", start = c(lat_max), count = c(lat_min-lat_max))
-      ##create min x and y
-      x_min <- min(longitude)
-      x_max <- max(longitude)
-      y_min <- min(latitude)
-      y_max <- max(latitude)
-      ##determine number of lat and lon points
-      n_y <- NROW(latitude)
-      n_x <- NROW(longitude)
-      
-      ##work out number of x and y cells
-      res <- (x_max-x_min)/n_x
-      res <- (y_max-y_min)/n_y
-      
-      ##create a data frame to setup polygon generation
-      df <- data.frame(X = c(x_min, x_max, x_max, x_min), 
-                       Y = c(y_max, y_max, y_min, y_min))
-      
-      ##generate a polygon of the area
-      vgt_area <- df %>%
-        st_as_sf(coords = c("X", "Y"), crs = latlong) %>%
-        dplyr::summarise(data = st_combine(geometry)) %>%
-        st_cast("POLYGON")
-      
-      ##import time stamps from netcdf
-      thyme <- ncvar_get(ECMWF, "time")
-      
-      ##convert to POSIX - info given here https://confluence.ecmwf.int/display/CKB/ERA5%3A+data+documentation#ERA5:datadocumentation-Dateandtimespecification
-      d8 <- lubridate::ymd("1900-01-01") + lubridate::hours(thyme)
-      
-      ## determine the variable in the ECMWF file
-      var <- names(ECMWF$var)
-      
-      ##create data frame of dates
-      d8r <- data.frame(date = d8)
-      ## ssrd data is cumulative so for the daily total we only need the value at the end of the day 23:00
-      d8_df <- d8r %>%
-  mutate(colsplit(date, " ", c("date", "hour")),
-         row_d8 = seq(1:NROW(date))) %>% 
-  filter(hour == "23:00:00")
-      
-      ##unique dates
-      indz <- unique(d8_df$row_d8)
-##list to populate
- all_rasts <- list()
- ##loop through each day, extract data and build a brick
- for (h in indz){
-   
-   D8 <- filter(d8_df, row_d8 == h)[,1]
-   
-   ##extract no2 variables for entire domain for 1 time step and altitude
-   r1 <- ncvar_get(ECMWF, var, start = c(lon_min,lat_max,h), count = c(n_x,n_y,1))
-   ##generate raster from it
-   r1 <- t(r1)
-   r <- raster(r1)
-   ##define the extent
-   bb <- extent(vgt_area)
-   extent(r) <- bb
-   r <- setExtent(r, bb,  keepres=FALSE)
-   ##define the crs
-   raster::crs(r) <- latlong
-   a2 <- r
-   ## to plot a smoother plot, the raster can be dissagragated, it will take longer to process and use more RAM
-   #a2 <- raster::disaggregate(r, fact = 2, method = "bilinear")
-   
-   #To convert to watts per square metre (W m-2), the accumulated values should be divided by the accumulation period expressed in seconds
-   a2 <- calc(a2, function(x) {x/(3600*24)})
-   ## add to list
-   all_rasts[[D8]] <- a2
-   print(D8) ## print where up to
-   flush.console()
-   
- }
- ##combine all raster layers
- ssrd_brick <- brick(all_rasts)
- 
-## To write out the raster use the script below
-writeRaster(ssrd_brick, filename=paste0("outputs/", c, "_ssrd.TIF"), format="GTiff", overwrite=TRUE,options=c("INTERLEAVE=BAND","COMPRESS=LZW"))
+p2 <- timeVariation(temp_mod_obs_down, "value", group = "variable")  
 
- ## WIND SPEED
- 
-v10 <- "10m_v_component_of_wind_2020.nc"
-u10 <- "10m_u_component_of_wind_2020.nc"
- 
- ECMWF_v <- nc_open(v10)
- ECMWF_u <- nc_open(u10)
- 
- lons <- ncvar_get(ECMWF_v, "longitude")
- lats <- ncvar_get(ECMWF_v, "latitude")
- 
- lon_min <- which.closest(lons, min_lon)
- lon_max <- which.closest(lons, max_lon)
- lat_min <- which.closest(lats, min_lat)
- lat_max <- which.closest(lats, max_lat)
- 
- ##determine how many latitude and longitude variables there are
- lat_n <- NROW(lats)
- lon_n <- NROW(lons)
- 
- longitude <- ncvar_get(ECMWF_v, "longitude", start = c(lon_min), count = c(lon_max-lon_min))
- latitude <- ncvar_get(ECMWF_v, "latitude", start = c(lat_max), count = c(lat_min-lat_max))
- ##create min x and y
- x_min <- min(longitude)
- x_max <- max(longitude)
- y_min <- min(latitude)
- y_max <- max(latitude)
- ##determine number of lat and lon points
- n_y <- NROW(latitude)
- n_x <- NROW(longitude)
- 
- ##work out number of x and y cells
- res <- (x_max-x_min)/n_x
- res <- (y_max-y_min)/n_y
- 
- ##create a data frame to setup polygon generation
- df <- data.frame(X = c(x_min, x_max, x_max, x_min), 
-                  Y = c(y_max, y_max, y_min, y_min))
- 
- ##generate a polygon of the area
- vgt_area <- df %>%
-   st_as_sf(coords = c("X", "Y"), crs = latlong) %>%
-   dplyr::summarise(data = st_combine(geometry)) %>%
-   st_cast("POLYGON")
- 
- thyme <- ncvar_get(ECMWF_v, "time")
- #d8 <- date(ymd_h(as.POSIXct(thyme, origin="1900-01-01 00:00")))
- d8 <- lubridate::ymd("1900-01-01") + lubridate::hours(thyme)
- 
- var <- names(ECMWF_v$var)
- row_d8 <- seq(1:NROW(d8))
- 
- d8r <- data.frame(date = d8)
- d8_df <- d8r %>%
-   mutate(row_d8 = seq(1:NROW(date)),
-          day = yday(date))
- 
- dayz <- unique(d8_df$day)
- 
- all_rasts <- list()
+ws_mod_obs <- noaa_ecmwf %>% 
+  transmute(date, obs = ws, mod = ws_ms) %>% 
+  melt('date')
 
- for (d in dayz){
-   
-   df <- filter(d8_df, day == d)
-   
-   df_day <- colsplit(df$date, " ", c("date", "hour"))[,1]
-   df_day <- df_day[1]
-   
-   indz <- unique(df$row_d8)
-   
-   each_day <- list()
- 
- for (h in indz){
-   
-   
-   D8 <- filter(df, row_d8 == h)[,1]
-   
-   ##extract no2 variables for entire domain for 1 time step and altitude
-   u <- ncvar_get(ECMWF_u, "u10", start = c(lon_min,lat_max,h), count = c(n_x,n_y,1))
-   ##generate raster from it
-   ru <- t(u)
-   ru <- raster(ru)
-   ##define the extent
-   bb <- extent(vgt_area)
-   extent(ru) <- bb
-   ru <- setExtent(ru, bb,  keepres=FALSE)
-   ##define the crs
-   raster::crs(ru) <- latlong
-   
-   ru <- raster::disaggregate(ru, fact = 2, method = "bilinear")
-   
-   u_xyz <- data.frame(rasterToPoints(ru))
-   
-   v <- ncvar_get(ECMWF_v, "v10", start = c(lon_min,lat_max,h), count = c(n_x,n_y,1))
-   ##generate raster from it
-   rv <- t(v)
-   rv <- raster(rv)
-   ##define the extent
-   bb <- extent(vgt_area)
-   extent(rv) <- bb
-   rv <- setExtent(rv, bb,  keepres=FALSE)
-   ##define the crs
-   raster::crs(rv) <- latlong
-   
-   ##as wind data is lower resolution than ssdr we can dissagregate to smooth
-   #rv <- raster::disaggregate(rv, fact = 5, method = "bilinear")
-   rv <- raster::disaggregate(rv, fact = 2, method = "bilinear")
-## convert to data frame to combine u and v components
-   v_xyz <- data.frame(rasterToPoints(rv))
-   
-   u_xyz$v <- v_xyz$layer
-   ## give header meaningful names
-   names(u_xyz) <- c("x", "y", "u10", "v10")
-   ## combine u and v elements to wind speed and direction and drop direction
-   ws_wd <- u_xyz %>%
-     mutate(wind_abs = sqrt(u10^2 + v10^2)) %>%
-     mutate(wind_dir_trig_to = atan2(u10/wind_abs, v10/wind_abs)) %>% 
-   mutate(wind_dir_trig_to_degrees = wind_dir_trig_to*180/pi) %>% 
-   mutate(wind_dir_trig_from_degrees = wind_dir_trig_to_degrees + 180) %>% 
-   mutate(wd = 90 - wind_dir_trig_from_degrees) %>% ##wind direction cardinal
-   mutate(ws = sqrt(u10^2 + v10^2)) %>% 
-     select(x, y, ws)
- ## convert back to raster
-  wsr <- rasterFromXYZ(ws_wd, crs = latlong)
-  ##to name list needs to be a raster
-D8 <- as.character(D8)
-  each_day[[D8]] <- wsr
-  print(D8)
-  flush.console()
-  
- }
-  ## average hourly values to full day
-   day_brick <- brick(each_day)
-   day_brick <- calc(day_brick, mean)
-   
- all_rasts[[df_day]]  <- day_brick
+p3 <- timeVariation(ws_mod_obs, 'value', group = 'variable')
 
- }
- 
- ws_brick <- brick(all_rasts)
-## If required write the raster out
-writeRaster(ws_brick, filename=paste0('outputs/', c, "_ws.TIF"), format="GTiff", overwrite=TRUE,options=c("INTERLEAVE=BAND","COMPRESS=LZW"))
-}
+wd_mod_obs <- noaa_ecmwf %>% 
+  transmute(date, obs = wd, mod = wd_deg) %>% 
+  melt('date')
+
+p4 <- timeVariation(wd_mod_obs, 'value', group = 'variable')
+
+wswd_obs <- noaa_ecmwf %>% 
+  select(date, ws,wd) %>% 
+  mutate(variable = "obs")
+
+wswd_mod <- noaa_ecmwf %>% 
+  select(date, ws = ws_ms, wd =wd_deg) %>% 
+  mutate(variable = "mod")
+
+wswd_mod_obs <- rbind(wswd_obs, wswd_mod)  
+
+p5 <- windRose(wswd_mod_obs, type = 'variable')

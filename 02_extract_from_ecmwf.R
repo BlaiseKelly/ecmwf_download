@@ -88,7 +88,8 @@ for (v in variables){
  
 }
 ## left join all variables in list to give a data frame with row for each hour for all variables
-ecmwf_all <- purrr::reduce(all_varz, left_join, by = "date")
+ecmwf_all <- purrr::reduce(all_varz, left_join, by = "date") %>% 
+  mutate(date2 = with_tz(date, tzone = "GMT"))
 
 ## define function to calculate wind direction in degrees from u and v
 windDir <- function(u,v){

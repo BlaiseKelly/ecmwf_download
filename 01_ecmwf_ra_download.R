@@ -40,9 +40,11 @@ max_lat <- place[4]+buff
   
   ##input ecmwf user id
   user = "" ## ecmwf username
+  user_id = ""
+  api_key = ""
   
-  wf_set_key(user = "", ## user id
-             key = "", ## key
+  wf_set_key(user = user_id, ## user id
+             key = api_key, ## key
              service = "cds") ##service (cds = 'climate data store')
   
   ##define variables to download. list is available here: https://confluence.ecmwf.int/display/CKB/ERA5-Land%3A+data+documentation#ERA5Land:datadocumentation-parameterlistingParameterlistings
@@ -78,7 +80,7 @@ max_lat <- place[4]+buff
                           target         = paste0(v, "_", y,m_nam, ".nc"))
       
       
-      nc_BLD <- wf_request(user = "59954",
+      nc_BLD <- wf_request(user = user_id,
                            request = request_BLD,
                            transfer = TRUE,
                            path = path_out,
